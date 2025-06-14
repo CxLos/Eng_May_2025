@@ -63,22 +63,25 @@ data = pd.DataFrame(client.open_by_url(sheet_url).sheet1.get_all_records())
 df = data.copy()
 
 # Strip whitespace from column names and string values
-df.columns = df.columns.str.strip()
-df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+for col in df.columns:
+    if df[col].dtype == 'object':
+        df[col] = df[col].map(lambda x: x.strip() if isinstance(x, str) else x)
+
 
 # Define a discrete color sequence
 # color_sequence = px.colors.qualitative.Plotly
 
 # Filtered df where 'Date of Activity:' is in December
-df['Date of Activity'] = pd.to_datetime(df['Date of Activity'], errors='coerce')
-df_larry = df[df['Date of Activity'].dt.month.isin([10, 11, 12, 1, 2, 3, 4, 5])]
+df['Date of Activity'] = pd.to_datetime(df['Date of Activity'], format='%m/%d/%Y', errors='coerce')
+# df['Date of Activity'] = pd.to_datetime(df['Date of Activity'], errors='coerce')
+# df_larry = df[df['Date of Activity'].dt.month.isin([10, 11, 12, 1, 2, 3, 4, 5])]
 df = df[df['Date of Activity'].dt.month == 5]
 
 # Get the reporting month:
 current_month = datetime(2025, 5, 1).strftime("%B")
 report_year = datetime(2025, 5, 1).strftime("%Y")
 
-# print(df.head(10))
+# print(df.head(20))
 # print('Total Marketing Events: ', len(df))
 # print('Column Names: \n', df.columns.tolist())
 # print('DF Shape:', df.shape)
@@ -135,27 +138,14 @@ df.rename(
     }, 
 inplace=True)
 
-df.rename(
-    columns={
-        "Activity Duration (minutes):" : "Activity Duration",
-        "Total travel time (minutes):" : "Travel",
-        "Person submitting this form:'," : "Person",
-        "Location Encountered:" : "Location",
-        "Individual's Insurance Status:" : "Insurance",
-        "Type of support given:" : "Support",
-        "Gender:" : "Gender",
-        "Race/Ethnicity:" : "Ethnicity",
-        # "" : "",
-    }, 
-inplace=True)
-
-df_larry = df[df['Person'] == 'Larry Wallace Jr.']
+# df_larry = df[df['Person'] == 'Larry Wallace Jr.']
 
 # ========================= Total Engagements ========================== #
 
 # Total number of engagements:
 total_engagements = len(df)
-# print('Total Engagements:', total_engagements)
+print('Total Engagements:', total_engagements)
+print("Person length before:", len(df['Person']))
 
 # -------------------------- Engagement Hours -------------------------- #
 
@@ -170,11 +160,12 @@ engagement_hours = round(engagement_hours)
 
 df['Travel'] = (
     df['Travel']
+    .astype(str)
+    .str.strip()
     .replace({
-    'Sustainable Food Center + APH Health Education Strategy Meeting & Planning Activities', 
-    0
-}))
-
+        'Sustainable Food Center + APH Health Education Strategy Meeting & Planning Activities': 0
+        })
+)
 df['Travel'] = pd.to_numeric(df['Travel'], errors='coerce').fillna(0)
 
 # Sum travel time in hours and round
@@ -263,7 +254,7 @@ status_pie = px.pie(
     margin=dict(t=70, r=50, b=30, l=40),
 ).update_traces(
     rotation=0,
-    textinfo='value+percent',
+    texttemplate='%{value}<br>(%{percent:.2%})',
     hovertemplate='<b>%{label}</b>: %{value}<extra></extra>'
 )
 
@@ -287,14 +278,13 @@ admin_categories = [
     "Research & Planning",
 ]
 
-df = df[df['Admin Activity'].notnull()]
-df = df[df['Admin Activity'].str.strip() != '']
+admin_activity = df[df['Admin Activity'].notnull()]
+admin_activity = admin_activity[admin_activity['Admin Activity'].str.strip() != '']
 
-df['Admin Activity'] = (
-    df['Admin Activity']
+admin_activity['Admin Activity'] = (
+    admin_activity['Admin Activity']
     .str.strip()
     .replace({
-        # '': 'N/A',
         'Record Keeping & Documentation': 'Record Keeping & Documentation',
         'Community engagement and Partnership': 'Communication & Correspondence',
         'Communication & Correspondence': 'Communication & Correspondence',
@@ -323,12 +313,29 @@ df['Admin Activity'] = (
 )
 
 # Identify unexpected/unapproved categories
-admin_unexpected = df[~df['Admin Activity'].isin(admin_categories)]
+admin_unexpected = admin_activity[~admin_activity['Admin Activity'].isin(admin_categories)]
 # print("Admin Unexpected: \n", admin_unexpected['Admin Activity'].unique().tolist())
 
-# Group by 'BMHC Administrative Activity:' dataframe:
-admin_activity = df.groupby('Admin Activity').size().reset_index(name='Count')
-# print("Admin Unique After: \n", admin_activity["Admin Activity"].unique().tolist())
+normalized_categories = {cat.lower().strip(): cat for cat in admin_categories}
+
+counter = Counter()
+for entry in df['Admin Activity']:
+    
+    # Split and clean each category
+    items = [i.strip().lower() for i in entry.split(",")]
+    for item in items:
+        if item in normalized_categories:
+            counter[normalized_categories[item]] += 1
+
+# Display the result
+# for category, count in counter.items():
+#     print(f"Support Counts: \n {category}: {count}")
+
+admin_activity = pd.DataFrame(counter.items(), columns=['Admin Activity', 'Count']).sort_values(by='Count', ascending=False)
+
+# Group by the renamed 'admin_activity' column
+# admin_activity = admin_activity.groupby('Admin Activity').size().reset_index(name='Count')
+# print(admin_activity.head(10))
 
 admin_bar=px.bar(
     admin_activity,
@@ -387,7 +394,6 @@ admin_bar=px.bar(
     hovertemplate='<b></b> %{label}<br><b>Count</b>: %{y}<extra></extra>'
 )
 
-# Insurance Status Pie Chart
 admin_pie=px.pie(
     admin_activity,
     names="Admin Activity",
@@ -406,7 +412,7 @@ admin_pie=px.pie(
     )
 ).update_traces(
     rotation=130,
-    textinfo='value+percent',
+    texttemplate='%{value}<br>(%{percent:.2%})',
     # textinfo='none',
     hovertemplate='<b>%{label}</b>: %{value}<extra></extra>',
     # pull = [0.1 if v < 5 else 0.01 + (v / max(admin_activity["Count"]) * 0.05) for v in admin_activity["Count"]]
@@ -434,15 +440,14 @@ care_categories = [
     "Work Force Development",
 ]
 
-df = df[df['Care Activity'].notnull()]
-df = df[df['Care Activity'].str.strip() != '']
+care_activity = df[df['Care Activity'].notnull()]
+care_activity = care_activity[care_activity['Care Activity'].str.strip() != '']
+care_activity = care_activity.copy()  # Avoid SettingWithCopyWarning
 
-# Replace with allowable categories:
-df['Care Activity'] = (
-    df['Care Activity']
+care_activity['Care Activity'] = (
+    care_activity['Care Activity']
     .str.strip()
     .replace({
-        # '': 'N/A',
         'client engagement and referrals': 'SDoH Provider',
         'SDoH Provider': 'SDoH Provider',
         'Clinical Provider': 'Clinical Provider',
@@ -467,11 +472,10 @@ df['Care Activity'] = (
 )
 
 # Identify unexpected/unapproved categories
-care_unexpected = df[~df['Care Activity'].isin(care_categories)]
-# print("Care Unexpected: \n", care_unexpected['Care Activity'].unique().tolist())
+care_unexpected = care_activity[~care_activity['Care Activity'].isin(care_categories)]
 
-# Group by 'Care Network Activity:' dataframe:
-care_network_activity = df.groupby('Care Activity').size().reset_index(name='Count')
+# Group by the renamed 'Care_activity' column
+care_network_activity = care_activity.groupby('Care Activity').size().reset_index(name='Count')
 
 care_bar=px.bar(
     care_network_activity,
@@ -547,7 +551,7 @@ care_pie=px.pie(
     )
 ).update_traces(
     rotation=70,
-    textinfo='value+percent',
+    texttemplate='%{value}<br>(%{percent:.2%})',
     # textinfo='none',
     hovertemplate='<b>%{label}</b>: %{value}<extra></extra>',
     # pull=[0.15 if v < 5 else 0.04 for v in admin_activity["Count"]]  # Pull out small slices more, and others slightly
@@ -558,7 +562,19 @@ care_pie=px.pie(
 # print("Outreach Unique Before: \n", df['Outreach Activity'].unique().tolist())
 
 outreach_unique = [
-'Mental HealthTraining', 'Presentation', 'Advocacy, Presentation', 'Advocacy', 'Tabling Event', 'Action planning', 'Mental Health First Aid Training', 'Presentation, Mental Training', 'Team meeting, training, and meeting with Dominique', 'Presentation,  Mental Health First Aid Training', 'HR onboarding', 'HR Onboarding', 'Training', 'Advocacy, Participant outreach', 'Advocacy, data collection', 'Onsite Outreach', 'Presentation, Tabling Event', 'Advocacy, Meeting/partnership', 'Community engagement', 'Team huddle,  meeting with Cameron, meeting with Misha and Arie to best determine coverage for the remainder of the week. Also sure we are on the same page on form submission', 'Navigation Huddle', 'CUC/MONTHLY MEETING', 'tour/partnership', 'tour and partnership', 'Followed up 22 contacts collected throughout the week.  Impact and engagement forms. Follow up  calls', 'Schedule appointments', 'Partnership Building', 'Capacity Building', 'Client navigation', 'Advocacy, Presentation, Tabling Event', 'CUC MEETING', 'scheduling meeting/ tour', 'Advocacy,', 'Advocacy, Tabling Event', 'meeting', 'administrative', 'Follow up on unhoused contacts,  team meeting,  newsletter submissions,  return calls'
+    'Mental HealthTraining', 'Presentation', 'Advocacy, Presentation', 'Advocacy', 'Tabling Event',
+    'Action planning', 'Mental Health First Aid Training', 'Presentation, Mental Training',
+    'Team meeting, training, and meeting with Dominique', 'Presentation,  Mental Health First Aid Training',
+    'HR onboarding', 'HR Onboarding', 'Training', 'Advocacy, Participant outreach',
+    'Advocacy, data collection', 'Onsite Outreach', 'Presentation, Tabling Event',
+    'Advocacy, Meeting/partnership', 'Community engagement',
+    'Team huddle,  meeting with Cameron, meeting with Misha and Arie to best determine coverage for the remainder of the week. Also sure we are on the same page on form submission',
+    'Navigation Huddle', 'CUC/MONTHLY MEETING', 'tour/partnership', 'tour and partnership',
+    'Followed up 22 contacts collected throughout the week.  Impact and engagement forms. Follow up  calls',
+    'Schedule appointments', 'Partnership Building', 'Capacity Building', 'Client navigation',
+    'Advocacy, Presentation, Tabling Event', 'CUC MEETING', 'scheduling meeting/ tour',
+    'Advocacy,', 'Advocacy, Tabling Event', 'meeting', 'administrative',
+    'Follow up on unhoused contacts,  team meeting,  newsletter submissions,  return calls'
 ]
 
 outreach_categories = [
@@ -571,13 +587,22 @@ outreach_categories = [
     "Scheduling",
 ]
 
-# Map fuzzy/messy strings to approved categories
-fuzzy_to_category = {
+# Replacement map with lowercase keys
+replacement_map = {
+    # Health Events
     'mental healthtraining': 'Health Event',
     'mental health first aid training': 'Health Event',
+    'movement is medicine': 'Health Event',
+
+    # Presentations
     'presentation': 'Presentation',
+    'continuous education/training': 'Presentation',
+
+    # Tabling
     'tabling event': 'Tabling Event',
     'tabling': 'Tabling Event',
+
+    # Advocacy-related
     'advocacy': 'Advocacy',
     'onsite outreach': 'Advocacy',
     'client navigation': 'Advocacy',
@@ -586,13 +611,15 @@ fuzzy_to_category = {
     'community engagement': 'Advocacy',
     'community engagement /outreach networking': 'Advocacy',
     'outreach & navigation': 'Advocacy',
-    'advocacy, participant outreach': 'Advocacy',
-    'advocacy, data collection': 'Advocacy',
-    'advocacy, meeting/partnership': 'Advocacy',
+    'participant outreach': 'Advocacy',
+    'data collection': 'Advocacy',
+    'meeting/partnership': 'Advocacy',
     'schedule appointments': 'Advocacy',
-    'follow up on unhoused contacts, team meeting, newsletter submissions, return calls': 'Advocacy',
+    'follow up on unhoused contacts': 'Advocacy',
     'followed up 22 contacts collected throughout the week. impact and engagement forms. follow up calls': 'Advocacy',
-    'team huddle, meeting with cameron, meeting with misha and arie to best determine coverage for the remainder of the week. also sure we are on the same page on form submission': 'Advocacy',
+    'team huddle': 'Advocacy',
+
+    # Event (virtual)
     'cuc/monthly meeting': 'Event (virtual)',
     'cuc meeting': 'Event (virtual)',
     'tour/partnership': 'Event (virtual)',
@@ -604,92 +631,33 @@ fuzzy_to_category = {
     'scheduling meeting/ tour': 'Event (virtual)',
     'hr onboarding': 'Event (virtual)',
     'administrative': 'Event (virtual)',
-    'continuous education/training': 'Presentation',
     'meeting': 'Event (virtual)',
     'event (virtual)': 'Event (virtual)',
-    'movement is medicine': 'Health Event',
 }
 
-# Normalize input column
-df = df[df['Outreach Activity'].notnull()]
-df['Outreach Activity'] = df['Outreach Activity'].str.strip()
+# Filter DataFrame
+outreach_activity = df[df['Outreach Activity'].notnull()]
+outreach_activity = outreach_activity[outreach_activity['Care Activity'].str.strip() != '']
+outreach_activity = outreach_activity.copy()
 
-# Re-map each row by splitting, normalizing, mapping
+# print("Outreach Length:", len(outreach_activity))
+
+# Count occurrences after cleaning + replacing
 counter = Counter()
-normalized_column = []
 
-for activity in df['Outreach Activity']:
-    # Split and clean
-    items = [item.strip().lower() for item in activity.split(",")]
-    mapped = []
-
+for entry in outreach_activity['Outreach Activity']:
+    items = [i.strip().lower() for i in entry.split(",") if i.strip()]
     for item in items:
-        # Map fuzzy string to a valid category
-        if item in fuzzy_to_category:
-            category = fuzzy_to_category[item]
-        elif item in [c.lower() for c in outreach_categories]:  # direct match
-            category = item.title()
-        else:
-            category = None
+        normalized = replacement_map.get(item, item.title())  # fallback to title-case original
+        counter[normalized] += 1
 
-        if category and category in outreach_categories:
-            mapped.append(category)
-            counter[category] += 1
+# Convert to DataFrame
+community_outreach_activity = (
+    pd.DataFrame(counter.items(), columns=['Outreach Activity', 'Count'])
+    .sort_values(by='Count', ascending=False)
+)
 
-    # Remove duplicates, sort, rejoin
-    mapped_unique = sorted(set(mapped))
-    normalized_column.append(", ".join(mapped_unique) if mapped_unique else "Uncategorized")
-
-# Assign cleaned results back to the DataFrame
-df['Outreach Activity'] = normalized_column
-
-# 🚫 Remove uncategorized rows
-df = df[df['Outreach Activity'] != "Uncategorized"]
-
-# Total count per single category
-df_outreach = pd.DataFrame(counter.items(), columns=['Outreach Activity', 'Count']).sort_values(by='Count', ascending=False)
-
-# Or counts of exact combinations
-community_outreach_activity = df.groupby('Outreach Activity').size().reset_index(name='Count')
-
-# Replace outreach_unique values above with outreach_categories:
-# df['Outreach Activity'] = (
-#     df['Outreach Activity']
-#     .str.strip()
-#     .replace({
-        # '': 'N/A',
-        # 'Advocacy': 'Advocacy',
-        # 'Health Event': 'Health Event',
-        # 'NEW PROPERTY TOUR': 'Event (virtual)',
-        # 'ECHO PSH': 'Event (virtual)',
-        # 'Presentation': 'Presentation',
-        # 'Tabling': 'Tabling Event',
-        # 'meeting': 'Event (virtual)',
-        # 'Health Event /Tabling': 'Health Event',
-        # 'Movement is Medicine': 'Health Event',
-        # 'Outreach & Navigation': 'Advocacy',
-        # 'Tabling Event': 'Tabling Event',
-        # 'Continuous education/Training': 'Presentation',
-        # 'Huddle weekly meeting': 'Event (virtual)',
-        # 'Community engagement /outreach networking': 'Advocacy',
-        # 'Community Engagement': 'Advocacy',
-        # 'Weekly staff meeting': 'Event (virtual)',
-        # 'In person event': 'Health Event',
-        # 'Event (virtual)': 'Event (virtual)',
-        # 'Movement is medicine': 'Health Event',
-        # 'Advocacy, Presentation': 'Advocacy',
-        # 'huddle': 'Event (virtual)',
-        # 'Advocacy, Tabling Event': 'Advocacy',
-        # 'TCSO jail application and meeting with Cameron': 'Advocacy',
-        # 'Presentation, Tabling Event': 'Presentation',
-        # 'Event (virtual), Presentation': 'Event (virtual)',
-#     })
-# )
-
-# Group by 'Community Outreach Activity:' dataframe
-# community_outreach_activity = df.groupby('Outreach Activity').size().reset_index(name='Count')
-
-# print(community_outreach_activity.value_counts())
+# print(community_outreach_activity)
 
 community_bar=px.bar(
     community_outreach_activity,
@@ -767,7 +735,7 @@ community_pie=px.pie(
     )
 ).update_traces(
     rotation=80,
-    textinfo='value+percent',
+    texttemplate='%{value}<br>(%{percent:.2%})',
     hovertemplate='<b>%{label}</b>: %{value}<extra></extra>',
     # The code is creating a list called `pull` using a list comprehension. For each value `v` in the
     # "Count" column of the `admin_activity` DataFrame (assuming it's a pandas DataFrame), it assigns
@@ -779,27 +747,17 @@ community_pie=px.pie(
 
 # ------------------------ Person Submitting Form -------------------- #
 
+# print("Person length", len(df['Person']))
 # print("Person Unique Before: \n", df["Person"].unique().tolist())
+# print("Person Value Counts Before: \n", df["Person"].value_counts())
 
 person_unique =[
-    'Larry Wallace Jr.', 
-    'Eric Roberts',
-    'Toya Craney', 
-    'Kim Holiday', 
-    'Eric roberts',
-    'Michael Lambert',
-    'Eric Robert',
-    'Antonio Montgomery', 
-    'Kiounis Williams',
-    'Jordan Calbert', 
-    'Kimberly Holiday', 
-    'Jaqueline Oviedo',
-    'Cameron Morgan',
-    'Steve Kemgang', 'Sonya Hosey'
+'Larry Wallace Jr.', 'Cameron Morgan', 'Jordan Calbert', 'Eric Roberts', 'Michael Lambert', 'Dominique Street', 'Jaqueline Oviedo', 'Sonya Hosey', 'Kimberly Holiday', 'Antonio Montgomery', 'Arianna Williams', 'Toya Craney', 'Steve Kemgang, Toya Craney', 'Kiounis Williams', 'Steve Kemgang', 'Jaqueline Oviedo, Viana Varela', 'Arianna Williams, Cameron Morgan', 'Jaqueline Oviedo, Viviana Varela'
 ]
 
 person_categories = [
     "Antonio Montgomery",
+    'Arianna Williams', 
     "Azaniah Israel",
     "Cameron Morgan",
     "Dominique Street",
@@ -815,8 +773,14 @@ person_categories = [
     "Toya Craney",
 ]
 
-df['Person'] = (
-    df['Person']
+# person df
+df_person = df[df['Person'].notnull()]
+df_person = df_person[df_person['Person'].str.strip() != '']
+
+
+df_person['Person'] = (
+    df_person['Person']
+    .astype(str)  # ensure string type
     .str.strip()
     .replace({
         "Larry Wallace Jr": "Larry Wallace Jr.", 
@@ -824,19 +788,21 @@ df['Person'] = (
         "Kim Holiday" : "Kimberly Holiday",
         "Eric roberts" : "Eric Roberts",
         "Eric Robert" : "Eric Roberts",
-    })
+    }, regex=False)
 )
 
-# Identify unexpected/unapproved categories
-person_unexpected = df[~df['Person'].isin(person_categories)]
+person_unexpected = df_person[~df_person['Person'].isin(person_categories)]
 # print("Person Unexpected: \n", person_unexpected['Person'].unique().tolist())
 
-df_person = df.groupby('Person').size().reset_index(name='Count')
-# print(df_person.value_counts())
-# print("Person Unique After: \n", df_person["Person submitting this form:"].unique().tolist())
-
-# Sort the DataFrame by 'Count' in ascending order:
-df_person = df_person.sort_values(by='Count', ascending=False)
+person_normalized = {cat.lower().strip(): cat for cat in person_categories}
+counter = Counter()
+for entry in df_person['Person']:
+    items = [i.strip().lower() for i in entry.split(",")]
+    for item in items:
+        if item in person_normalized:
+            counter[person_normalized[item]] += 1
+            
+df_person = pd.DataFrame(counter.items(), columns=['Person', 'Count']).sort_values(by='Count', ascending=False)
 
 person_bar=px.bar(
     df_person,
@@ -912,9 +878,9 @@ person_pie=px.pie(
         color='black'
     )
 ).update_traces(
-    rotation=25,
+    rotation=200,
     textposition='auto',
-    textinfo='value+percent',
+    texttemplate='%{value}<br>(%{percent:.2%})',
     hovertemplate='<b>%{label} Status</b>: %{value}<extra></extra>',
     # pull = [0.1 if v < 5 else 0.01 + (v / max(admin_activity["Count"]) * 0.05) for v in admin_activity["Count"]]
 )
